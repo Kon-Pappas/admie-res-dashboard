@@ -29,14 +29,15 @@ try:
     
     plot_df = pd.DataFrame(data)
 
-    # Δημιουργία του Stacked Bar Chart
+    # Δημιουργία του Stacked Bar Chart με αντίστροφη σειρά
     fig = px.bar(plot_df, 
                  x='Hour', 
-                 y=['Wind_SCADA', 'Total_PV', 'Total_CHP', 'Hydro_SCADA', 'Total_Small_Hydro', 'Total_Biomass'],
+                 y=['Total_Biomass', 'Total_Small_Hydro', 'Hydro_SCADA', 'Total_CHP', 'Total_PV', 'Wind_SCADA'],
                  title=f'Ημερήσια Παραγωγή ΑΠΕ (MWh) - Προσομοίωση για {date_str}',
                  labels={'value': 'Παραγωγή (MWh)', 'variable': 'Τεχνολογία'},
                  barmode='stack',
                  color_discrete_sequence=px.colors.qualitative.Pastel)
+
 
     # Σώσιμο σε HTML σελίδα
     fig.write_html("index.html")

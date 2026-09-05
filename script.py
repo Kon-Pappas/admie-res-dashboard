@@ -25,6 +25,14 @@ def fetch_real_data():
         res_scada = requests.get(scada_url, headers=headers)
         res_mv = requests.get(mv_url, headers=headers)
         
+        # Τυπώνουμε τα statuses στην κονσόλα του GitHub Actions για να δούμε τι συμβαίνει
+        print(f"SCADA Status: {res_scada.status_code}, MV Status: {res_mv.status_code}")
+        
+        if res_scada.status_code != 200 or res_mv.status_code != 200:
+            raise Exception(f"API Error - SCADA: {res_scada.status_code}, MV: {res_mv.status_code}")
+
+        scada_df = pd.read_excel(io.BytesIO(res_scada.content), skiprows=4)
+        
         if res_scada.status_code != 200 or res_mv.status_code != 200:
             raise Exception("Το API δεν επέστρεψε τα αρχεία.")
 

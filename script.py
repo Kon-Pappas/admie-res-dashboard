@@ -6,7 +6,7 @@ import io
 import os
 
 # 1. Ημερομηνία αναφοράς (Χθεσινή μέρα)
-date_target = datetime.now() - timedelta(days=1)
+date_target = datetime.now() - timedelta(days=3)
 date_formatted = date_target.strftime('%Y-%m-%d')
 date_str = date_target.strftime('%Y-%m-%d')
 

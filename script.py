@@ -6,7 +6,7 @@ import io
 import os
 
 # 1. Ημερομηνία αναφοράς (Χθεσινή μέρα)
-date_target = datetime.now() - timedelta(days=3)
+date_target = datetime.now() - timedelta(days=1)
 date_formatted = date_target.strftime('%Y-%m-%d')
 date_str = date_target.strftime('%Y-%m-%d')
 
@@ -14,7 +14,7 @@ print(f"Λήψη δεδομένων ΑΔΜΗΕ μέσω API για: {date_format
 
 csv_filename = "historical_data.csv"
 
-# Τα επίσημα URLs του API του ΑΔΜΗΕ βάating των filetypes που βρήκαμε
+# Τα επίσημα URLs του API του ΑΔΜΗΕ
 scada_url = f"https://www.admie.gr/getOperationMarketFile?dateStart={date_formatted}&dateEnd={date_formatted}&FileCategory=SystemRealizationSCADA"
 mv_url = f"https://www.admie.gr/getOperationMarketFile?dateStart={date_formatted}&dateEnd={date_formatted}&FileCategory=RESMV"
 
@@ -25,19 +25,21 @@ def fetch_real_data():
         res_scada = requests.get(scada_url, headers=headers)
         res_mv = requests.get(mv_url, headers=headers)
         
-        # Τυπώνουμε τα statuses στην κονσόλα του GitHub Actions για να δούμε τι συμβαίνει
         print(f"SCADA Status: {res_scada.status_code}, MV Status: {res_mv.status_code}")
         
         if res_scada.status_code != 200 or res_mv.status_code != 200:
             raise Exception(f"API Error - SCADA: {res_scada.status_code}, MV: {res_mv.status_code}")
 
-        scada_df = pd.read_excel(io.BytesIO(res_scada.content), skiprows=4)
-        
-        if res_scada.status_code != 200 or res_mv.status_code != 200:
-            raise Exception("Το API δεν επέστρεψε τα αρχεία.")
-
-        scada_df = pd.read_excel(io.BytesIO(res_scada.content), skiprows=4)
-        mv_df = pd.read_excel(io.BytesIO(res_mv.content), skiprows=4)
+        # Ανάγνωση με δοκιμή και των δύο engines για απόλυτη ασφάλεια (.xls / .xlsx)
+        try:
+            scada_df = pd.read_excel(io.BytesIO(res_scada.content), skiprows=4, engine='xlrd')
+        except:
+            scada_df = pd.read_excel(io.BytesIO(res_scada.content), skiprows=4, engine='openpyxl')
+            
+        try:
+            mv_df = pd.read_excel(io.BytesIO(res_mv.content), skiprows=4, engine='xlrd')
+        except:
+            mv_df = pd.read_excel(io.BytesIO(res_mv.content), skiprows=4, engine='openpyxl')
         
         scada_cols = [str(c).lower() for c in scada_df.columns]
         scada_df.columns = scada_cols

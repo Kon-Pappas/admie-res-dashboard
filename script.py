@@ -2,50 +2,35 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 import requests
-from bs4 import BeautifulSoup
 import io
 
-# 1. Βρίσκουμε τη χθεσινή ημερομηνία (Μορφή DD.MM.YYYY για το URL)
+# 1. Ημερομηνία αναφοράς (Χθεσινή μέρα)
 date_target = datetime.now() - timedelta(days=1)
-search_date = date_target.strftime('%d.%m.%Y')
+year = date_target.strftime('%Y')
+month = date_target.strftime('%m')
+yyyymmdd = date_target.strftime('%Y%m%d')
+report_date = date_target.strftime('%d.%m.%Y')
 
-print(f"Αναζήτηση δεδομένων στο site του ΑΔΜΗΕ για: {search_date}")
+print(f"Απευθείας ανάκτηση για ημερομηνία: {report_date}")
 
-# Το ακριβές link αναζήτησης που βρήκαμε
-search_url = f"https://www.admie.gr/agora/statistika-agoras/dedomena?data_type%5B%5D=510&data_type%5B%5D=523&since={search_date}&until={search_date}&op=Υποβολή"
+# Κατασκευή των URLs βάσει του μονοπατιού που ανακαλύψαμε
+scada_url = f"https://www.admie.gr/sites/default/files/attached-files/type-file/{year}/{month}/{yyyymmdd}_SystemRealizationSCADA_01.xls"
+mv_url = f"https://www.admie.gr/sites/default/files/attached-files/type-file/{year}/{month}/{yyyymmdd}_RESMV_01.xls"
+
 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
 def fetch_and_parse():
     try:
-        # -- ΦΑΣΗ 1: Web Scraping για να βρούμε τα ακριβή links των Excel --
-        print("Σάρωση σελίδας για εντοπισμό των αρχείων...")
-        resp = requests.get(search_url, headers=headers)
-        soup = BeautifulSoup(resp.content, 'html.parser')
-        
-        # Βρίσκουμε όλα τα links
-        links = soup.find_all('a', href=True)
-        
-        scada_url = None
-        mv_url = None
-        
-        for link in links:
-            href = link['href']
-            if 'SystemRealizationSCADA' in href:
-                scada_url = href if href.startswith('http') else 'https://www.admie.gr' + href
-            elif 'RESMV' in href:
-                mv_url = href if href.startswith('http') else 'https://www.admie.gr' + href
-                
-        if not scada_url or not mv_url:
-            raise Exception("Δεν βρέθηκαν τα αρχεία για αυτή την ημερομηνία. Ίσως ο ΑΔΜΗΕ καθυστερεί την ανάρτηση.")
-            
-        print(f"Βρέθηκε SCADA: {scada_url}")
-        print(f"Βρέθηκε MV Injections: {mv_url}")
-        
-        # -- ΦΑΣΗ 2: Κατέβασμα των αρχείων --
+        print(f"Λήψη SCADA: {scada_url}")
         res_scada = requests.get(scada_url, headers=headers)
+        
+        print(f"Λήψη MV Injections: {mv_url}")
         res_mv = requests.get(mv_url, headers=headers)
+        
+        if res_scada.status_code != 200 or res_mv.status_code != 200:
+            raise Exception("Τα αρχεία δεν έχουν ανέβει ακόμα στον server για αυτή την ημερομηνία.")
 
-        # -- ΦΑΣΗ 3: Ανάλυση Δεδομένων (Data Parsing) --
+        # Ανάλυση Δεδομένων (Data Parsing)
         scada_df = pd.read_excel(io.BytesIO(res_scada.content), skiprows=4)
         mv_df = pd.read_excel(io.BytesIO(res_mv.content), skiprows=4)
         
@@ -79,7 +64,7 @@ def fetch_and_parse():
         bm_cols = [c for c in scada_cols if 'bm' in c]
         plot_df['Biomass_SCADA'] = scada_df[bm_cols].sum(axis=1) if bm_cols else 0
 
-        # -- SCADA (Α. Αιολικά - Αποκλεισμός όλων των άλλων) --
+        # -- SCADA (Α. Αιολικά - Αποκλεισμός άλλων) --
         exclude_keywords = ['pv', 'pv2', 'cg', 'hydro', 'bm', 'pump', 'bess', 'hour', 'ώρα', 'σύνολο', 'total', 'lignite', 'gas', 'thermal', 'net']
         wind_cols = [c for c in scada_cols if not any(kw in c for kw in exclude_keywords)]
         plot_df['Wind_SCADA'] = scada_df[wind_cols].sum(axis=1) if wind_cols else 0
@@ -90,11 +75,11 @@ def fetch_and_parse():
         plot_df['Total_Small_Hydro'] = plot_df['Small_Hydro_SCADA'] + plot_df['Small_Hydro_MV']
         plot_df['Total_Biomass'] = plot_df['Biomass_SCADA'] + plot_df['Biomass_MV']
 
-        return plot_df, False, search_date
+        return plot_df, False, report_date
 
     except Exception as e:
         print(f"Σφάλμα: {e}")
-        return generate_dummy_data(), True, search_date
+        return generate_dummy_data(), True, report_date
 
 def generate_dummy_data():
     return pd.DataFrame({
@@ -107,21 +92,17 @@ def generate_dummy_data():
         'Total_Biomass': [2] * 24
     })
 
-# -- Εκτέλεση και Δημιουργία Γραφήματος --
 plot_df, is_dummy, report_date = fetch_and_parse()
-
-title_status = "ΠΡΟΣΟΜΟΙΩΣΗ (Δεν βρέθηκαν αρχεία - Ίσως ο ΑΔΜΗΕ καθυστερεί)" if is_dummy else "ΠΡΑΓΜΑΤΙΚΑ ΔΕΔΟΜΕΝΑ"
+title_status = "ΠΡΟΣΟΜΟΙΩΣΗ (Αναμονή δημοσίευσης από ΑΔΜΗΕ)" if is_dummy else "ΠΡΑΓΜΑΤΙΚΑ ΔΕΔΟΜΕΝΑ"
 
 fig = px.bar(plot_df, 
              x='Hour', 
              y=['Total_Biomass', 'Total_Small_Hydro', 'Hydro_SCADA', 'Total_CHP', 'Total_PV', 'Wind_SCADA'],
-             title=f'Ημερήσια Παραγωγή ΑΠΕ (MWh) - Ημερομηνία Αναφοράς: {report_date} [{title_status}]',
-             labels={'value': 'Παραγωγή (MWh)', 'variable': 'Τεχνολογία', 'Hour': 'Ώρα (1-24)'},
+             title=f'Ημερήσια Παραγωγή ΑΠΕ (MWh) - Ημερομηνία: {report_date} [{title_status}]',
+             labels={'value': 'Παραγωγή (MWh)', 'variable': 'Τεχνολογία', 'Hour': 'Ώρα'},
              barmode='stack',
              color_discrete_sequence=px.colors.qualitative.Set2)
 
-# Κάνουμε τον άξονα Χ να δείχνει σωστά τις ώρες από 1 έως 24
 fig.update_xaxes(tickmode='linear', tick0=1, dtick=1)
-
 fig.write_html("index.html")
-print("Το γράφημα δημιουργήθηκε!")
+print("Ολοκληρώθηκε.")

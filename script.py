@@ -7,18 +7,16 @@ import os
 
 # 1. Ημερομηνία αναφοράς (Χθεσινή μέρα)
 date_target = datetime.now() - timedelta(days=1)
-year = date_target.strftime('%Y')
-month = date_target.strftime('%m')
-yyyymmdd = date_target.strftime('%Y%m%d')
+date_formatted = date_target.strftime('%Y-%m-%d')
 date_str = date_target.strftime('%Y-%m-%d')
 
-print(f"Αναζήτηση δεδομένων για: {yyyymmdd}")
+print(f"Λήψη δεδομένων ΑΔΜΗΕ μέσω API για: {date_formatted}")
 
 csv_filename = "historical_data.csv"
 
-# Δομημένα URLs απευθείας από τον server του ΑΔΜΗΕ
-scada_url = f"https://www.admie.gr/sites/default/files/attached-files/type-file/{year}/{month}/{yyyymmdd}_SystemRealizationSCADA_01.xls"
-mv_url = f"https://www.admie.gr/sites/default/files/attached-files/type-file/{year}/{month}/{yyyymmdd}_RESMV_01.xls"
+# Τα επίσημα URLs του API του ΑΔΜΗΕ βάating των filetypes που βρήκαμε
+scada_url = f"https://www.admie.gr/getOperationMarketFile?dateStart={date_formatted}&dateEnd={date_formatted}&FileCategory=SystemRealizationSCADA"
+mv_url = f"https://www.admie.gr/getOperationMarketFile?dateStart={date_formatted}&dateEnd={date_formatted}&FileCategory=RESMV"
 
 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
@@ -28,7 +26,7 @@ def fetch_real_data():
         res_mv = requests.get(mv_url, headers=headers)
         
         if res_scada.status_code != 200 or res_mv.status_code != 200:
-            raise Exception("Τα αρχεία δεν βρέθηκαν ακόμα στον server.")
+            raise Exception("Το API δεν επέστρεψε τα αρχεία.")
 
         scada_df = pd.read_excel(io.BytesIO(res_scada.content), skiprows=4)
         mv_df = pd.read_excel(io.BytesIO(res_mv.content), skiprows=4)
@@ -40,7 +38,7 @@ def fetch_real_data():
 
         plot_df = pd.DataFrame({'Hour': range(1, 25)})
 
-        # Εφαρμογή κανόνων σου
+        # Εφαρμογή των κανόνων σου
         plot_df['PV_MV'] = mv_df['φβ'] if 'φβ' in mv_cols else 0
         plot_df['CHP_MV'] = mv_df['σηθυα'] if 'σηθυα' in mv_cols else 0
         plot_df['Small_Hydro_MV'] = mv_df['μυης'] if 'μυης' in mv_cols else 0
@@ -70,12 +68,10 @@ def fetch_real_data():
         plot_df['Total_Small_Hydro'] = plot_df['Small_Hydro_SCADA'] + plot_df['Small_Hydro_MV']
         plot_df['Total_Biomass'] = plot_df['Biomass_SCADA'] + plot_df['Biomass_MV']
 
-        # Προσθήκη στήλης ημερομηνίας
         plot_df['Date'] = date_str
         return plot_df, False
     except Exception as e:
-        print(f"Σφάλμα λήψης: {e}")
-        # Fallback δεδομένα προσομοίωσης αν δεν ανέβηκαν τα αρχεία
+        print(f"Σφάλμα λήψης μέσω API: {e}")
         hours = list(range(1, 25))
         dummy_df = pd.DataFrame({
             'Date': [date_str] * 24,
@@ -89,10 +85,10 @@ def fetch_real_data():
         })
         return dummy_df, True
 
-# Λήψη δεδομένων ημέρας
+# Λήψη δεδομένων
 today_df, is_dummy = fetch_real_data()
 
-# Ενημέρωση του Historical CSV
+# Ενημέρωση Historical CSV
 if os.path.exists(csv_filename):
     history_df = pd.read_csv(csv_filename)
     history_df = history_df[history_df['Date'] != date_str]
@@ -102,8 +98,8 @@ else:
 
 full_df.to_csv(csv_filename, index=False)
 
-# Δημιουργία Γραφήματος για τη συγκεκριμένη μέρα
-status_text = "ΠΡΟΣΟΜΟΙΩΣΗ (Αναμονή αρχείων ΑΔΜΗΕ)" if is_dummy else "ΠΡΑΓΜΑΤΙΚΑ ΔΕΔΟΜΕΝΑ"
+# Δημιουργία Γραφήματος
+status_text = "ΠΡΟΣΟΜΟΙΩΣΗ (Αναμονή δημοσίευσης)" if is_dummy else "ΠΡΑΓΜΑΤΙΚΑ ΔΕΔΟΜΕΝΑ ΑΔΜΗΕ"
 
 fig = px.bar(today_df, 
              x='Hour', 
@@ -115,4 +111,4 @@ fig = px.bar(today_df,
 
 fig.update_xaxes(tickmode='linear', tick0=1, dtick=1)
 fig.write_html("index.html")
-print("Η διαδικασία ολοκληρώθηκε με επιτυχία!")
+print("Η διαδικασία ολοκληρώθηκε!")

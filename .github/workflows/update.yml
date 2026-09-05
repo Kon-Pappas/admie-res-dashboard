@@ -3,13 +3,13 @@ name: Daily ADMIE Dashboard
 on:
   schedule:
     - cron: '0 8 * * *' # Τρέχει κάθε μέρα στις 11:00 Ελλάδος
-  workflow_dispatch: # Επιτρέπει να το τρέχεις χειροκίνητα με ένα κουμπί!
+  workflow_dispatch: # Επιτρέπει τη χειροκίνητη εκτέλεση
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Επιτρέπει στο bot να σώζει το γράφημα
+      contents: write # Απαραίτητο για να μπορεί το bot να κάνει commit τα αρχεία
 
     steps:
       - name: Κατέβασμα κώδικα
@@ -26,10 +26,10 @@ jobs:
       - name: Εκτέλεση Κώδικα Python
         run: python script.py
 
-      - name: Αποθήκευση Γραφήματος (Commit)
+      - name: Αποθήκευση Δεδομένων και Γραφήματος
         run: |
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "action@github.com"
-          git add index.html
-          git commit -m "Αυτόματη ενημέρωση γραφήματος" || exit 0
+          git add index.html historical_data.csv
+          git commit -m "Αυτόματη ενημέρωση δεδομένων και γραφήματος" || exit 0
           git push

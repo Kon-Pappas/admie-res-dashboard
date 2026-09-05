@@ -1,66 +1,118 @@
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
+import requests
+import io
 import os
 
 # 1. Ημερομηνία αναφοράς (Χθεσινή μέρα)
 date_target = datetime.now() - timedelta(days=1)
+year = date_target.strftime('%Y')
+month = date_target.strftime('%m')
+yyyymmdd = date_target.strftime('%Y%m%d')
 date_str = date_target.strftime('%Y-%m-%d')
 
-print(f"Επεξεργασία δεδομένων για την ημερομηνία: {date_str}")
+print(f"Αναζήτηση δεδομένων για: {yyyymmdd}")
 
 csv_filename = "historical_data.csv"
 
-# 2. Συνάρτηση δημιουργίας δεδομένων (Πραγματικών ή Προσομοίωσης)
-def get_daily_data():
-    # Εδώ στο μέλλον μπορούμε να προσθέσουμε την αυτοματοποιημένη ανάγνωση των excel σου.
-    # Προς το παρόν, δημιουργούμε τα 24ωρα δεδομένα για να χτιστεί η βάση.
-    hours = list(range(1, 25))
-    df = pd.DataFrame({
-        'Date': [date_str] * 24,
-        'Hour': hours,
-        'Wind_SCADA': [60 + (i%5)*2 for i in hours],
-        'Total_PV': [0,0,0,0,0,0,15,40,70,100,130,150,150,130,100,70,40,15,0,0,0,0,0,0],
-        'Total_CHP': [25] * 24,
-        'Hydro_SCADA': [12] * 24,
-        'Total_Small_Hydro': [6] * 24,
-        'Total_Biomass': [3] * 24
-    })
-    return df
+# Δομημένα URLs απευθείας από τον server του ΑΔΜΗΕ
+scada_url = f"https://www.admie.gr/sites/default/files/attached-files/type-file/{year}/{month}/{yyyymmdd}_SystemRealizationSCADA_01.xls"
+mv_url = f"https://www.admie.gr/sites/default/files/attached-files/type-file/{year}/{month}/{yyyymmdd}_RESMV_01.xls"
 
-# Παίρνουμε τα δεδομένα της ημέρας
-today_df = get_daily_data()
+headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-# 3. Διαχείριση του Ιστορικού CSV (Appending)
+def fetch_real_data():
+    try:
+        res_scada = requests.get(scada_url, headers=headers)
+        res_mv = requests.get(mv_url, headers=headers)
+        
+        if res_scada.status_code != 200 or res_mv.status_code != 200:
+            raise Exception("Τα αρχεία δεν βρέθηκαν ακόμα στον server.")
+
+        scada_df = pd.read_excel(io.BytesIO(res_scada.content), skiprows=4)
+        mv_df = pd.read_excel(io.BytesIO(res_mv.content), skiprows=4)
+        
+        scada_cols = [str(c).lower() for c in scada_df.columns]
+        scada_df.columns = scada_cols
+        mv_cols = [str(c).lower() for c in mv_df.columns]
+        mv_df.columns = mv_cols
+
+        plot_df = pd.DataFrame({'Hour': range(1, 25)})
+
+        # Εφαρμογή κανόνων σου
+        plot_df['PV_MV'] = mv_df['φβ'] if 'φβ' in mv_cols else 0
+        plot_df['CHP_MV'] = mv_df['σηθυα'] if 'σηθυα' in mv_cols else 0
+        plot_df['Small_Hydro_MV'] = mv_df['μυης'] if 'μυης' in mv_cols else 0
+        plot_df['Biomass_MV'] = mv_df['β/α'] if 'β/α' in mv_cols else 0
+
+        pv_cols = [c for c in scada_cols if 'pv' in c or 'pv2' in c]
+        plot_df['PV_SCADA'] = scada_df[pv_cols].sum(axis=1) if pv_cols else 0
+
+        cg_cols = [c for c in scada_cols if 'cg' in c]
+        plot_df['CHP_SCADA'] = scada_df[cg_cols].sum(axis=1) if cg_cols else 0
+
+        hydro_cols = [c for c in scada_cols if 'hydro' in c]
+        small_hydro_cols = [c for c in hydro_cols if 'small' in c or '<5' in c]
+        big_hydro_cols = [c for c in hydro_cols if c not in small_hydro_cols]
+        plot_df['Hydro_SCADA'] = scada_df[big_hydro_cols].sum(axis=1) if big_hydro_cols else 0
+        plot_df['Small_Hydro_SCADA'] = scada_df[small_hydro_cols].sum(axis=1) if small_hydro_cols else 0
+
+        bm_cols = [c for c in scada_cols if 'bm' in c]
+        plot_df['Biomass_SCADA'] = scada_df[bm_cols].sum(axis=1) if bm_cols else 0
+
+        exclude_keywords = ['pv', 'pv2', 'cg', 'hydro', 'bm', 'pump', 'bess', 'hour', 'ώρα', 'σύνολο', 'total', 'lignite', 'gas', 'thermal', 'net']
+        wind_cols = [c for c in scada_cols if not any(kw in c for kw in exclude_keywords)]
+        plot_df['Wind_SCADA'] = scada_df[wind_cols].sum(axis=1) if wind_cols else 0
+
+        plot_df['Total_PV'] = plot_df['PV_SCADA'] + plot_df['PV_MV']
+        plot_df['Total_CHP'] = plot_df['CHP_SCADA'] + plot_df['CHP_MV']
+        plot_df['Total_Small_Hydro'] = plot_df['Small_Hydro_SCADA'] + plot_df['Small_Hydro_MV']
+        plot_df['Total_Biomass'] = plot_df['Biomass_SCADA'] + plot_df['Biomass_MV']
+
+        # Προσθήκη στήλης ημερομηνίας
+        plot_df['Date'] = date_str
+        return plot_df, False
+    except Exception as e:
+        print(f"Σφάλμα λήψης: {e}")
+        # Fallback δεδομένα προσομοίωσης αν δεν ανέβηκαν τα αρχεία
+        hours = list(range(1, 25))
+        dummy_df = pd.DataFrame({
+            'Date': [date_str] * 24,
+            'Hour': hours,
+            'Wind_SCADA': [70] * 24,
+            'Total_PV': [0,0,0,0,0,0,20,50,90,120,150,180,180,150,120,90,50,20,0,0,0,0,0,0],
+            'Total_CHP': [20] * 24,
+            'Hydro_SCADA': [15] * 24,
+            'Total_Small_Hydro': [8] * 24,
+            'Total_Biomass': [3] * 24
+        })
+        return dummy_df, True
+
+# Λήψη δεδομένων ημέρας
+today_df, is_dummy = fetch_real_data()
+
+# Ενημέρωση του Historical CSV
 if os.path.exists(csv_filename):
-    # Αν υπάρχει ήδη το αρχείο, διαβάζουμε το παλιό ιστορικό
     history_df = pd.read_csv(csv_filename)
-    # Αφαιρούμε τυχόν διπλότυπη εγγραφή για την ίδια ημερομηνία (για να μην μπαίνει διπλή)
     history_df = history_df[history_df['Date'] != date_str]
-    # Ενώνουμε το παλιό ιστορικό με τη σημερινή μέρα
     full_df = pd.concat([history_df, today_df], ignore_index=True)
 else:
-    # Αν δεν υπάρχει, το σημερινό γίνεται η αρχή του ιστορικού
     full_df = today_df
 
-# Αποθηκεύουμε το ενημερωμένο CSV πίσω στο GitHub
 full_df.to_csv(csv_filename, index=False)
-print(f"Το αρχείο {csv_filename} ενημερώθηκε επιτυχώς!")
 
-# 4. Δημιουργία Γραφήματος ΜΟΝΟ για τη χθεσινή/τελευταία μέρα
-plot_df = full_df[full_df['Date'] == date_str]
+# Δημιουργία Γραφήματος για τη συγκεκριμένη μέρα
+status_text = "ΠΡΟΣΟΜΟΙΩΣΗ (Αναμονή αρχείων ΑΔΜΗΕ)" if is_dummy else "ΠΡΑΓΜΑΤΙΚΑ ΔΕΔΟΜΕΝΑ"
 
-if plot_df.empty:
-    plot_df = today_df # Fallback αν κάτι πάει στραβά
-
-fig = px.bar(plot_df, 
+fig = px.bar(today_df, 
              x='Hour', 
              y=['Total_Biomass', 'Total_Small_Hydro', 'Hydro_SCADA', 'Total_CHP', 'Total_PV', 'Wind_SCADA'],
-             title=f'Ημερήσια Παραγωγή ΑΠΕ (MWh) - Ημερομηνία: {date_str}',
+             title=f'Ημερήσια Παραγωγή ΑΠΕ (MWh) - {date_str} [{status_text}]',
              labels={'value': 'Παραγωγή (MWh)', 'variable': 'Τεχνολογία', 'Hour': 'Ώρα'},
              barmode='stack',
              color_discrete_sequence=px.colors.qualitative.Set2)
 
 fig.update_xaxes(tickmode='linear', tick0=1, dtick=1)
 fig.write_html("index.html")
-print("Το dashboard (index.html) ανανεώθηκε!")
+print("Η διαδικασία ολοκληρώθηκε με επιτυχία!")

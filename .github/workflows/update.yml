@@ -1,35 +1,34 @@
-name: Daily ADMIE Dashboard
+name: Auto-Update SCADA Telemetry
 
 on:
   schedule:
-    - cron: '0 8 * * *' # Τρέχει κάθε μέρα στις 11:00 Ελλάδος
-  workflow_dispatch: # Επιτρέπει τη χειροκίνητη εκτέλεση
+    # Τρέχει κάθε ώρα, στο λεπτό 0. Μπορείς να το αλλάξεις ανάλογα με τον ρυθμό δημοσίευσης των δεδομένων.
+    - cron: '0 * * * *'
+  workflow_dispatch: # Προσθέτει ένα κουμπί "Run workflow" στο GitHub για χειροκίνητη εκτέλεση
 
 jobs:
-  build:
+  update-data:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # Απαραίτητο για να μπορεί το bot να κάνει commit τα αρχεία
-
     steps:
-      - name: Κατέβασμα κώδικα
-        uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Εγκατάσταση Python
-        uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: Εγκατάσταση Βιβλιοθηκών
-        run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install pandas # Βάλε εδώ όποια άλλη βιβλιοθήκη χρειάζεσαι (π.χ. openpyxl, requests)
 
-      - name: Εκτέλεση Κώδικα Python
-        run: python script.py
+      - name: Run Data Update Script
+        run: python update_data.py
 
-      - name: Αποθήκευση Δεδομένων και Γραφήματος
+      - name: Commit and Push new data.json
         run: |
-          git config --global user.name "GitHub Action Bot"
-          git config --global user.email "action@github.com"
-          git add index.html historical_data.csv
-          git commit -m "Αυτόματη ενημέρωση δεδομένων και γραφήματος" || exit 0
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          # Το '|| exit 0' αποτρέπει το να χτυπήσει error αν τα δεδομένα δεν άλλαξαν
+          git commit -m "Auto-update telemetry data (JSON)" || exit 0
           git push
